@@ -88,6 +88,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "StudyFlow AI — Your Academic Operating System" },
       { name: "twitter:description", content: "Plan, study, revise and achieve — powered by AI. StudyFlow is the calm, focused workspace for students who want to learn better." },
+      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/L6mzGcnUKWg7Xo45qdRXnc7aLEj2/social-images/social-1783863521061-study_flow_logo.webp" },
+      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/L6mzGcnUKWg7Xo45qdRXnc7aLEj2/social-images/social-1783863521061-study_flow_logo.webp" },
     ],
     links: [
       {
