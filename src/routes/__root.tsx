@@ -83,9 +83,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "description", content: "Plan, study, revise and achieve — powered by AI. StudyFlow is the calm, focused workspace for students who want to learn better." },
       { name: "author", content: "StudyFlow AI" },
       { property: "og:title", content: "StudyFlow AI — Your Academic Operating System" },
-      { property: "og:description", content: "Plan, study, revise and achieve — powered by AI." },
+      { property: "og:description", content: "Plan, study, revise and achieve — powered by AI. StudyFlow is the calm, focused workspace for students who want to learn better." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "StudyFlow AI — Your Academic Operating System" },
+      { name: "twitter:description", content: "Plan, study, revise and achieve — powered by AI. StudyFlow is the calm, focused workspace for students who want to learn better." },
     ],
     links: [
       {
