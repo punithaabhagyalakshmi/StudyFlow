@@ -424,3 +424,110 @@ export const getDashboard = createServerFn({ method: "GET" })
       goals: goalsRes.data ?? [],
     };
   });
+
+/* ---------------- daily check-in (streak) ---------------- */
+
+export const checkInToday = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i: unknown) =>
+    z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const today = data.date;
+    const { data: stats } = await context.supabase
+      .from("user_stats")
+      .select("*")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+
+    if (stats?.last_active_date === today) {
+      return { ok: true, already: true, streak: stats.streak ?? 1, xp: 0 };
+    }
+
+    const prev = stats?.last_active_date ?? null;
+    const yesterday = new Date(`${today}T12:00:00.000Z`);
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    const yKey = yesterday.toISOString().slice(0, 10);
+
+    const streak = prev === yKey ? (stats?.streak ?? 0) + 1 : 1;
+    const xpGain = 10;
+    const xp = (stats?.xp ?? 0) + xpGain;
+
+    const { error } = await context.supabase.from("user_stats").upsert({
+      user_id: context.userId,
+      xp,
+      level: Math.floor(xp / 500) + 1,
+      streak,
+      longest_streak: Math.max(streak, stats?.longest_streak ?? 0),
+      last_active_date: today,
+      total_study_minutes: stats?.total_study_minutes ?? 0,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true, already: false, streak, xp: xpGain };
+  });
+
+/* ---------------- analytics ---------------- */
+
+export const getAnalytics = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const since = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+    const [statsRes, pomRes, tasksRes, subjRes, quizRes, cardRes] = await Promise.all([
+      context.supabase.from("user_stats").select("*").eq("user_id", context.userId).maybeSingle(),
+      context.supabase
+        .from("pomodoro_sessions")
+        .select("duration_minutes, type, started_at, subject_id")
+        .gte("started_at", `${since}T00:00:00.000Z`),
+      context.supabase.from("tasks").select("id, status, completed_at, priority, subject_id"),
+      context.supabase.from("subjects").select("id, name, color"),
+      context.supabase.from("quizzes").select("id, title, score, total, created_at"),
+      context.supabase.from("flashcards").select("id, known"),
+    ]);
+
+    const poms = (pomRes.data ?? []).filter((p) => p.type === "focus");
+    const days: { day: string; label: string; minutes: number }[] = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000);
+      const key = d.toISOString().slice(0, 10);
+      days.push({
+        day: key,
+        label: d.toLocaleDateString(undefined, { day: "numeric", month: "short" }),
+        minutes: poms
+          .filter((p) => (p.started_at ?? "").slice(0, 10) === key)
+          .reduce((s, p) => s + (p.duration_minutes ?? 0), 0),
+      });
+    }
+
+    const subjects = subjRes.data ?? [];
+    const tasks = tasksRes.data ?? [];
+    const bySubject = subjects.map((s) => ({
+      name: s.name,
+      color: s.color,
+      minutes: poms
+        .filter((p) => p.subject_id === s.id)
+        .reduce((sum, p) => sum + (p.duration_minutes ?? 0), 0),
+      tasks: tasks.filter((t) => t.subject_id === s.id).length,
+    }));
+
+    const quizzes = (quizRes.data ?? []).filter((q) => q.score !== null && q.total);
+    const cards = cardRes.data ?? [];
+
+    return {
+      stats: statsRes.data,
+      days,
+      totalMinutes: days.reduce((s, d) => s + d.minutes, 0),
+      sessions: poms.length,
+      bySubject,
+      tasksTotal: tasks.length,
+      tasksDone: tasks.filter((t) => t.status === "completed").length,
+      quizAvg: quizzes.length
+        ? Math.round(
+            (quizzes.reduce((s, q) => s + (q.score ?? 0) / (q.total || 1), 0) / quizzes.length) * 100,
+          )
+        : null,
+      quizCount: quizzes.length,
+      cardsTotal: cards.length,
+      cardsKnown: cards.filter((c) => c.known).length,
+    };
+  });
