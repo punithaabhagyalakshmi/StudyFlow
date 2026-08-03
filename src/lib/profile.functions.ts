@@ -16,6 +16,7 @@ export const getMyProfile = createServerFn({ method: "GET" })
 
 const OnboardingSchema = z.object({
   full_name: z.string().min(1).max(120),
+  avatar_url: z.string().url().max(500).optional().nullable(),
   college: z.string().max(200).optional().nullable(),
   department: z.string().max(200).optional().nullable(),
   year: z.number().int().min(1).max(10).optional().nullable(),
