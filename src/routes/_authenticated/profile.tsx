@@ -126,7 +126,7 @@ function ProfilePage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const stats = dash?.stats as { current_streak?: number; xp?: number; total_study_minutes?: number } | undefined;
+  const stats = dash?.stats;
   const initials = (form.full_name || "S")
     .split(" ").map((p) => p[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
 
@@ -167,7 +167,7 @@ function ProfilePage() {
           </p>
         </div>
         <div className="flex gap-4 text-sm">
-          <Stat icon={Flame} label="Streak" value={`${stats?.current_streak ?? 0}d`} />
+          <Stat icon={Flame} label="Streak" value={`${stats?.streak ?? 0}d`} />
           <Stat icon={Zap} label="XP" value={String(stats?.xp ?? 0)} />
           <Stat icon={Clock} label="Focus" value={`${Math.round((stats?.total_study_minutes ?? 0) / 60)}h`} />
         </div>
