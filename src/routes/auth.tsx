@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
@@ -28,9 +28,36 @@ function AuthPage() {
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // After an OAuth redirect the provider drops us back here with a session.
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled && data.session) navigate({ to: "/dashboard" });
+    });
+    return () => { cancelled = true; };
+  }, [navigate]);
+
   async function handleGoogle() {
     setLoading(true);
     try {
+      const host = window.location.hostname;
+      // The Lovable-managed OAuth broker only works on lovable.app / connected
+      // custom domains. Anywhere else (e.g. a Vercel deployment or localhost)
+      // we go straight through Supabase's own Google callback.
+      const useBroker = host.endsWith("lovable.app") || host.endsWith("lovable.dev");
+
+      if (!useBroker) {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: window.location.origin + "/auth",
+            queryParams: { prompt: "select_account" },
+          },
+        });
+        if (error) throw error;
+        return; // browser redirects to Google
+      }
+
       const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin + "/auth" });
       if (result.error) throw result.error;
       if (!result.redirected) {
