@@ -31,6 +31,24 @@ function AuthPage() {
   async function handleGoogle() {
     setLoading(true);
     try {
+      const host = window.location.hostname;
+      // The Lovable-managed OAuth broker only works on lovable.app / connected
+      // custom domains. Anywhere else (e.g. a Vercel deployment or localhost)
+      // we go straight through Supabase's own Google callback.
+      const useBroker = host.endsWith("lovable.app") || host.endsWith("lovable.dev");
+
+      if (!useBroker) {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: window.location.origin + "/auth",
+            queryParams: { prompt: "select_account" },
+          },
+        });
+        if (error) throw error;
+        return; // browser redirects to Google
+      }
+
       const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin + "/auth" });
       if (result.error) throw result.error;
       if (!result.redirected) {
