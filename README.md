@@ -310,7 +310,7 @@ Coming Soon...
 
 # 🌐 Live Demo
 
-**Coming Soon**
+https://study-flowww.lovable.app/
 
 ---
 
