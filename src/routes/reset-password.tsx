@@ -74,7 +74,12 @@ function ResetPage() {
       try {
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) return fail(error.message);
+          if (error) {
+            const msg = /verifier|code challenge|invalid request/i.test(error.message)
+              ? "This link must be opened in the same browser you requested it from. Send yourself a fresh link below and open it from this device."
+              : error.message;
+            return fail(msg);
+          }
           return ok();
         }
         if (tokenHash) {
