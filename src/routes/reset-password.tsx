@@ -42,6 +42,20 @@ function ResetPage() {
   const [pw, setPw] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resendEmail, setResendEmail] = useState("");
+  const [resending, setResending] = useState(false);
+
+  async function sendNewLink(e: React.FormEvent) {
+    e.preventDefault();
+    if (!resendEmail) return;
+    setResending(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(resendEmail, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setResending(false);
+    if (error) toast.error(error.message);
+    else toast.success("New reset link sent. Open it in this browser.");
+  }
 
   // Consume the recovery link (PKCE ?code=, ?token_hash=, or #access_token=)
   useEffect(() => {
@@ -74,7 +88,12 @@ function ResetPage() {
       try {
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) return fail(error.message);
+          if (error) {
+            const msg = /verifier|code challenge|invalid request/i.test(error.message)
+              ? "This link must be opened in the same browser you requested it from. Send yourself a fresh link below and open it from this device."
+              : error.message;
+            return fail(msg);
+          }
           return ok();
         }
         if (tokenHash) {
@@ -148,8 +167,31 @@ function ResetPage() {
               {errorMsg ?? "This password reset link can't be used."} Reset links work once and expire after a short
               time — request a fresh one.
             </p>
-            <Button asChild className="w-full bg-brand-gradient text-primary-foreground">
-              <Link to="/auth" search={{ mode: "signin" }}>Request a new link</Link>
+            <form onSubmit={sendNewLink} className="space-y-2 text-left">
+              <Label htmlFor="resend">Your email</Label>
+              <Input
+                id="resend"
+                type="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={resendEmail}
+                onChange={(e) => setResendEmail(e.target.value)}
+                required
+              />
+              <Button
+                type="submit"
+                disabled={resending}
+                className="w-full bg-brand-gradient text-primary-foreground"
+              >
+                {resending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Email me a new link"}
+              </Button>
+            </form>
+            <p className="text-xs text-muted-foreground">
+              Tip: open the link on this same device and browser. If it lands in spam, use "Not spam" so future
+              links stay clickable.
+            </p>
+            <Button asChild variant="ghost" className="w-full">
+              <Link to="/auth" search={{ mode: "signin" }}>Back to sign in</Link>
             </Button>
           </div>
         )}
