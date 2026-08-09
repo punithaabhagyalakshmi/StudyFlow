@@ -16,7 +16,7 @@ export function createLovableAiGatewayProvider(
 }
 
 export function getGatewayModel(modelId = "google/gemini-3.6-flash") {
-  const key = process.env.LOVABLE_API_KEY;
+  const key = process.env["LOVABLE_API_KEY"];
   if (!key) throw new Error("AI is not configured yet. Missing API key.");
-  return createLovableAiGatewayProvider(key, { structuredOutputs: true })(modelId);
+  return createLovableAiGatewayProvider(key, { structuredOutputs: false })(modelId);
 }

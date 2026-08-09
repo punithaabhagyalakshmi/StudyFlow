@@ -3,9 +3,6 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import {
   PlanInput,
-  PlanSchema,
-  FlashcardsSchema,
-  QuizSchema,
   planPrompt,
 } from "@/lib/ai-schemas";
 
@@ -13,29 +10,17 @@ export const generateStudyPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i: unknown) => PlanInput.parse(i))
   .handler(async ({ data, context }) => {
-    const { generateText, Output, NoObjectGeneratedError } = await import("ai");
+    const { generateText } = await import("ai");
     const { getGatewayModel } = await import("@/lib/ai-gateway.server");
-    const attempt = async () => {
-      const { output } = await generateText({
-        model: getGatewayModel(),
-        output: Output.object({ schema: PlanSchema }),
-        system:
-          "You are StudyFlow AI, an expert academic coach. You design realistic, motivating study schedules for students.",
-        prompt: planPrompt(data),
-      });
-      return output;
-    };
+    const { parseStudyPlan, STUDY_PLAN_JSON_INSTRUCTIONS } = await import("@/lib/ai-output.server");
     try {
-      let output;
-      try {
-        output = await attempt();
-      } catch (first) {
-        if (!NoObjectGeneratedError.isInstance(first)) throw first;
-        const raw = (first as { text?: string }).text ?? "";
-        const match = raw.match(/\{[\s\S]*\}/);
-        const parsed = match ? PlanSchema.safeParse(JSON.parse(match[0])) : null;
-        output = parsed?.success ? parsed.data : await attempt();
-      }
+      const { text } = await generateText({
+        model: getGatewayModel(),
+        system:
+          "You are StudyFlow AI, an expert academic coach. You design realistic, motivating study schedules for students. Follow the requested JSON contract exactly.",
+        prompt: `${planPrompt(data)}\n\n${STUDY_PLAN_JSON_INSTRUCTIONS}`,
+      });
+      const output = parseStudyPlan(text);
       const { data: row, error } = await context.supabase
         .from("study_plans")
         .insert({
@@ -49,8 +34,8 @@ export const generateStudyPlan = createServerFn({ method: "POST" })
       if (error) throw new Error(error.message);
       return row;
     } catch (e) {
-      if (NoObjectGeneratedError.isInstance(e))
-        throw new Error("The AI response could not be parsed. Please try again.");
+      if (e instanceof z.ZodError || e instanceof SyntaxError)
+        throw new Error("The AI returned an incomplete study plan. Please try once more.");
       throw e;
     }
   });
@@ -123,30 +108,30 @@ export const generateFlashcardsAI = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data, context }) => {
-    const { generateText, Output, NoObjectGeneratedError } = await import("ai");
+    const { generateText } = await import("ai");
     const { getGatewayModel } = await import("@/lib/ai-gateway.server");
-    let output;
+    const { parseFlashcards, FLASHCARDS_JSON_INSTRUCTIONS } = await import("@/lib/ai-output.server");
     try {
-      ({ output } = await generateText({
+      const { text } = await generateText({
         model: getGatewayModel(),
-        output: Output.object({ schema: FlashcardsSchema }),
-        system: "You create concise, high-quality study flashcards.",
-        prompt: `Create ${data.count} flashcards about: ${data.topic}. Fronts are short questions or terms; backs are precise answers under 40 words.`,
+        system: "You create concise, high-quality study flashcards and follow the requested JSON contract exactly.",
+        prompt: `Create ${data.count} flashcards about: ${data.topic}. Fronts are short questions or terms; backs are precise answers under 40 words.\n\n${FLASHCARDS_JSON_INSTRUCTIONS}`,
+      });
+      const output = parseFlashcards(text);
+      const rows = output.cards.slice(0, data.count).map((c) => ({
+        user_id: context.userId,
+        deck_id: data.deck_id,
+        front: c.front,
+        back: c.back,
       }));
+      const { error } = await context.supabase.from("flashcards").insert(rows);
+      if (error) throw new Error(error.message);
+      return { inserted: rows.length };
     } catch (e) {
-      if (NoObjectGeneratedError.isInstance(e))
+      if (e instanceof z.ZodError || e instanceof SyntaxError)
         throw new Error("The AI could not build these flashcards. Try again with a clearer topic.");
       throw e;
     }
-    const rows = output.cards.slice(0, data.count).map((c) => ({
-      user_id: context.userId,
-      deck_id: data.deck_id,
-      front: c.front,
-      back: c.back,
-    }));
-    const { error } = await context.supabase.from("flashcards").insert(rows);
-    if (error) throw new Error(error.message);
-    return { inserted: rows.length };
   });
 
 export const generateQuizAI = createServerFn({ method: "POST" })
@@ -161,38 +146,38 @@ export const generateQuizAI = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data, context }) => {
-    const { generateText, Output, NoObjectGeneratedError } = await import("ai");
+    const { generateText } = await import("ai");
     const { getGatewayModel } = await import("@/lib/ai-gateway.server");
-    let output;
+    const { parseQuiz, QUIZ_JSON_INSTRUCTIONS } = await import("@/lib/ai-output.server");
     try {
-      ({ output } = await generateText({
+      const { text } = await generateText({
         model: getGatewayModel(),
-        output: Output.object({ schema: QuizSchema }),
-        system: "You are an exam setter creating multiple choice questions for college students.",
-        prompt: `Write ${data.count} ${data.difficulty} multiple-choice questions about: ${data.topic}. Each has exactly 4 options, one correct answerIndex (0-3) and a one-sentence explanation.`,
-      }));
+        system: "You are an exam setter creating multiple choice questions for college students. Follow the requested JSON contract exactly.",
+        prompt: `Write ${data.count} ${data.difficulty} multiple-choice questions about: ${data.topic}. Each has exactly 4 options, one correct answerIndex (0-3) and a one-sentence explanation.\n\n${QUIZ_JSON_INSTRUCTIONS}`,
+      });
+      const output = parseQuiz(text);
+      const questions = output.questions.filter(
+        (q) => q.options.length === 4 && q.answerIndex >= 0 && q.answerIndex < q.options.length,
+      );
+      if (questions.length === 0) throw new Error("No valid questions were generated. Please try again.");
+      const { data: row, error } = await context.supabase
+        .from("quizzes")
+        .insert({
+          user_id: context.userId,
+          title: data.topic.slice(0, 120),
+          difficulty: data.difficulty,
+          questions,
+          total: questions.length,
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      return row;
     } catch (e) {
-      if (NoObjectGeneratedError.isInstance(e))
+      if (e instanceof z.ZodError || e instanceof SyntaxError)
         throw new Error("The AI could not build this quiz. Try again with a clearer topic.");
       throw e;
     }
-    const questions = output.questions.filter(
-      (q) => q.options.length >= 2 && q.answerIndex >= 0 && q.answerIndex < q.options.length,
-    );
-    if (questions.length === 0) throw new Error("No valid questions were generated. Please try again.");
-    const { data: row, error } = await context.supabase
-      .from("quizzes")
-      .insert({
-        user_id: context.userId,
-        title: data.topic.slice(0, 120),
-        difficulty: data.difficulty,
-        questions,
-        total: questions.length,
-      })
-      .select()
-      .single();
-    if (error) throw new Error(error.message);
-    return row;
   });
 
 export const saveQuizScore = createServerFn({ method: "POST" })
