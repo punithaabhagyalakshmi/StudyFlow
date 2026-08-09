@@ -15,7 +15,7 @@ export const generateStudyPlan = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { generateText, Output, NoObjectGeneratedError } = await import("ai");
     const { getGatewayModel } = await import("@/lib/ai-gateway.server");
-    try {
+    const attempt = async () => {
       const { output } = await generateText({
         model: getGatewayModel(),
         output: Output.object({ schema: PlanSchema }),
@@ -23,6 +23,19 @@ export const generateStudyPlan = createServerFn({ method: "POST" })
           "You are StudyFlow AI, an expert academic coach. You design realistic, motivating study schedules for students.",
         prompt: planPrompt(data),
       });
+      return output;
+    };
+    try {
+      let output;
+      try {
+        output = await attempt();
+      } catch (first) {
+        if (!NoObjectGeneratedError.isInstance(first)) throw first;
+        const raw = (first as { text?: string }).text ?? "";
+        const match = raw.match(/\{[\s\S]*\}/);
+        const parsed = match ? PlanSchema.safeParse(JSON.parse(match[0])) : null;
+        output = parsed?.success ? parsed.data : await attempt();
+      }
       const { data: row, error } = await context.supabase
         .from("study_plans")
         .insert({
