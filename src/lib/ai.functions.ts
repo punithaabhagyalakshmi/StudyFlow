@@ -110,14 +110,21 @@ export const generateFlashcardsAI = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data, context }) => {
-    const { generateText, Output } = await import("ai");
+    const { generateText, Output, NoObjectGeneratedError } = await import("ai");
     const { getGatewayModel } = await import("@/lib/ai-gateway.server");
-    const { output } = await generateText({
-      model: getGatewayModel(),
-      output: Output.object({ schema: FlashcardsSchema }),
-      system: "You create concise, high-quality study flashcards.",
-      prompt: `Create ${data.count} flashcards about: ${data.topic}. Fronts are short questions or terms; backs are precise answers under 40 words.`,
-    });
+    let output;
+    try {
+      ({ output } = await generateText({
+        model: getGatewayModel(),
+        output: Output.object({ schema: FlashcardsSchema }),
+        system: "You create concise, high-quality study flashcards.",
+        prompt: `Create ${data.count} flashcards about: ${data.topic}. Fronts are short questions or terms; backs are precise answers under 40 words.`,
+      }));
+    } catch (e) {
+      if (NoObjectGeneratedError.isInstance(e))
+        throw new Error("The AI could not build these flashcards. Try again with a clearer topic.");
+      throw e;
+    }
     const rows = output.cards.slice(0, data.count).map((c) => ({
       user_id: context.userId,
       deck_id: data.deck_id,
@@ -141,22 +148,33 @@ export const generateQuizAI = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data, context }) => {
-    const { generateText, Output } = await import("ai");
+    const { generateText, Output, NoObjectGeneratedError } = await import("ai");
     const { getGatewayModel } = await import("@/lib/ai-gateway.server");
-    const { output } = await generateText({
-      model: getGatewayModel(),
-      output: Output.object({ schema: QuizSchema }),
-      system: "You are an exam setter creating multiple choice questions for college students.",
-      prompt: `Write ${data.count} ${data.difficulty} multiple-choice questions about: ${data.topic}. Each has exactly 4 options, one correct answerIndex (0-3) and a one-sentence explanation.`,
-    });
+    let output;
+    try {
+      ({ output } = await generateText({
+        model: getGatewayModel(),
+        output: Output.object({ schema: QuizSchema }),
+        system: "You are an exam setter creating multiple choice questions for college students.",
+        prompt: `Write ${data.count} ${data.difficulty} multiple-choice questions about: ${data.topic}. Each has exactly 4 options, one correct answerIndex (0-3) and a one-sentence explanation.`,
+      }));
+    } catch (e) {
+      if (NoObjectGeneratedError.isInstance(e))
+        throw new Error("The AI could not build this quiz. Try again with a clearer topic.");
+      throw e;
+    }
+    const questions = output.questions.filter(
+      (q) => q.options.length >= 2 && q.answerIndex >= 0 && q.answerIndex < q.options.length,
+    );
+    if (questions.length === 0) throw new Error("No valid questions were generated. Please try again.");
     const { data: row, error } = await context.supabase
       .from("quizzes")
       .insert({
         user_id: context.userId,
         title: data.topic.slice(0, 120),
         difficulty: data.difficulty,
-        questions: output.questions,
-        total: output.questions.length,
+        questions,
+        total: questions.length,
       })
       .select()
       .single();
