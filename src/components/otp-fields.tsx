@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from "react";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 
 export function OtpFields({
@@ -36,6 +37,14 @@ export function OtpFields({
   );
 }
 
-export function useCooldown() {
-  return null;
+/** Simple client-side resend cooldown (seconds remaining + starter). */
+export function useCooldown(seconds = 60) {
+  const [left, setLeft] = useState(0);
+  useEffect(() => {
+    if (left <= 0) return;
+    const t = setTimeout(() => setLeft((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [left]);
+  const start = useCallback(() => setLeft(seconds), [seconds]);
+  return { left, start, active: left > 0 };
 }
