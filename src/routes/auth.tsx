@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { GraduationCap, Loader2 } from "lucide-react";
+import { GraduationCap, Loader2, MailCheck } from "lucide-react";
+import { OtpFields, useCooldown } from "@/components/otp-fields";
 
 const searchSchema = z.object({ mode: z.enum(["signin", "signup"]).optional() });
 
@@ -27,6 +28,10 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [otpEmail, setOtpEmail] = useState("");
+  const cooldown = useCooldown(60);
 
   // After an OAuth redirect the provider drops us back here with a session.
   useEffect(() => {
@@ -94,9 +99,44 @@ function AuthPage() {
   }
 
   async function handleReset() {
-    if (!email) { toast.error("Enter your email above first."); return; }
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + "/reset-password" });
-    if (error) toast.error(error.message); else toast.success("Reset email sent.");
+    navigate({ to: "/reset-password", search: { email: email || undefined } });
+  }
+
+  async function sendOtp(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!otpEmail) { toast.error("Enter your email first."); return; }
+    if (cooldown.active) return;
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: otpEmail,
+        options: { shouldCreateUser: true, emailRedirectTo: window.location.origin + "/auth" },
+      });
+      if (error) throw error;
+      setOtpSent(true);
+      setOtp("");
+      cooldown.start();
+      toast.success("We sent a 6-digit code to your email.");
+    } catch (err) {
+      const m = err instanceof Error ? err.message : "Could not send the code";
+      toast.error(/rate|too many/i.test(m) ? "Too many requests. Please wait a minute and try again." : m);
+    } finally { setLoading(false); }
+  }
+
+  async function verifyOtp(code = otp) {
+    if (code.length !== 6) { toast.error("Enter the full 6-digit code."); return; }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({ email: otpEmail, token: code, type: "email" });
+      if (error) throw error;
+      if (!data.session) throw new Error("Could not start your session. Request a new code.");
+      await router.invalidate();
+      navigate({ to: "/dashboard" });
+    } catch (err) {
+      const m = err instanceof Error ? err.message : "Verification failed";
+      toast.error(/expired|invalid/i.test(m) ? "That code is invalid or expired. Request a new one." : m);
+      setOtp("");
+    } finally { setLoading(false); }
   }
 
   return (
@@ -118,11 +158,47 @@ function AuthPage() {
             <div className="h-px flex-1 bg-border" /> or <div className="h-px flex-1 bg-border" />
           </div>
           <Tabs value={tab} onValueChange={(v) => setTab(v as "signin" | "signup")}>
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="signin">Sign in</TabsTrigger>
               <TabsTrigger value="signup">Create account</TabsTrigger>
+              <TabsTrigger value="otp">Email code</TabsTrigger>
             </TabsList>
-            <form onSubmit={handleEmail} className="mt-4 space-y-3">
+            <TabsContent value="otp" className="mt-4 space-y-3">
+              {!otpSent ? (
+                <form onSubmit={sendOtp} className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="otp-email">Email</Label>
+                    <Input id="otp-email" type="email" autoComplete="email" value={otpEmail}
+                      onChange={(e) => setOtpEmail(e.target.value)} required />
+                  </div>
+                  <p className="text-xs text-muted-foreground">We'll email you a 6-digit code — no password needed.</p>
+                  <Button type="submit" disabled={loading || cooldown.active}
+                    className="h-11 w-full bg-brand-gradient text-primary-foreground shadow-glow">
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : cooldown.active ? `Wait ${cooldown.left}s` : "Send code"}
+                  </Button>
+                </form>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <MailCheck className="h-4 w-4 text-primary" /> Code sent to {otpEmail}
+                  </div>
+                  <OtpFields value={otp} onChange={setOtp} onComplete={verifyOtp} disabled={loading} />
+                  <Button onClick={() => verifyOtp()} disabled={loading || otp.length !== 6}
+                    className="h-11 w-full bg-brand-gradient text-primary-foreground shadow-glow">
+                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & sign in"}
+                  </Button>
+                  <div className="flex items-center justify-between text-xs">
+                    <button type="button" onClick={() => { setOtpSent(false); setOtp(""); }}
+                      className="text-muted-foreground underline underline-offset-4 hover:text-foreground">Change email</button>
+                    <button type="button" onClick={() => sendOtp()} disabled={cooldown.active || loading}
+                      className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:no-underline disabled:opacity-60">
+                      {cooldown.active ? `Resend in ${cooldown.left}s` : "Resend code"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+            <form onSubmit={handleEmail} className="mt-4 space-y-3 data-[hidden=true]:hidden" data-hidden={tab === "otp"}>
               <TabsContent value="signup" className="mt-0 space-y-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="name">Full name</Label>
